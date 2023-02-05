@@ -16,7 +16,7 @@ type baseCommand struct {
 	Log *log.Logger
 }
 
-func BaseCommand(logger *log.Logger) *baseCommand {
+func NewBaseCommand(logger *log.Logger) *baseCommand {
 	return &baseCommand{
 		Ctx: context.Background(),
 		Log: logger,

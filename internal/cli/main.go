@@ -10,7 +10,7 @@ import (
 
 func Main(args []string) int {
 	logger := log.Default()
-	commands := Commands(logger)()
+	commands := NewCommandFactory(logger)()
 	cli := &cli.CLI{
 		Name:        AppName,
 		Version:     AppVersion,

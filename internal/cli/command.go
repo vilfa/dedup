@@ -31,8 +31,8 @@ type ResolveCommand struct {
 	base *baseCommand
 }
 
-func Commands(logger *log.Logger) func() map[string]cli.CommandFactory {
-	base := BaseCommand(logger)
+func NewCommandFactory(logger *log.Logger) func() map[string]cli.CommandFactory {
+	base := NewBaseCommand(logger)
 	return func() map[string]cli.CommandFactory {
 		return map[string]cli.CommandFactory{
 			"index": func() (cli.Command, error) {

@@ -25,4 +25,5 @@ require (
 	github.com/spf13/cast v1.3.1 // indirect
 	golang.org/x/crypto v0.0.0-20200820211705-5c72a883971a // indirect
 	golang.org/x/sys v0.0.0-20190412213103-97732733099d // indirect
+	gopkg.in/yaml.v2 v2.4.0
 )
