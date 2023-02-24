@@ -16,31 +16,39 @@ const (
 )
 
 type dirStat struct {
-	Path         string
-	Size         int
-	FileCount    int
-	DirCount     int
-	SpecCount    int
-	Timestamp    int64
-	marshallType util.MarshallType
+	Path        string
+	Size        int
+	FileCount   int
+	DirCount    int
+	SpecCount   int
+	Timestamp   int64
+	marshalType util.MarshallType
 }
 
 type DirStatImpl interface {
+	FPath() string
 	Read() error
 	Write() error
 	Stat() error
 	Ts() time.Time
+	Files() ([]fs.DirEntry, error)
+	LenFiles() int
+	MarshalType() util.MarshallType
 }
 
 func NewDirStat(dir string, mTyp util.MarshallType) (DirStatImpl, error) {
 	return &dirStat{
-		Path:         dir,
-		Size:         0,
-		FileCount:    0,
-		DirCount:     0,
-		Timestamp:    0,
-		marshallType: mTyp,
+		Path:        dir,
+		Size:        0,
+		FileCount:   0,
+		DirCount:    0,
+		Timestamp:   0,
+		marshalType: mTyp,
 	}, nil
+}
+
+func (d *dirStat) FPath() string {
+	return d.Path
 }
 
 func (d *dirStat) Read() error {
@@ -54,9 +62,9 @@ func (d *dirStat) Read() error {
 		return fmt.Errorf("could not read dir info: %v", err)
 	}
 
-	err = util.Unmarshall(d.marshallType, buf, d)
+	err = util.Unmarshall(d.marshalType, buf, d)
 	if err != nil {
-		if d.marshallType == util.Json {
+		if d.marshalType == util.Json {
 			err = util.Unmarshall(util.Yaml, buf, d)
 		} else {
 			err = util.Unmarshall(util.Json, buf, d)
@@ -75,7 +83,7 @@ func (d *dirStat) Write() error {
 		return fmt.Errorf("invalid dir info path: %v", fpath)
 	}
 
-	buf, err := util.Marshall(d.marshallType, d)
+	buf, err := util.Marshall(d.marshalType, d)
 	if err != nil {
 		return fmt.Errorf("could not marshall dir info: %v", err)
 	}
@@ -118,4 +126,32 @@ func (d *dirStat) Stat() error {
 
 func (d *dirStat) Ts() time.Time {
 	return time.UnixMilli(d.Timestamp)
+}
+
+func (d *dirStat) Files() ([]fs.DirEntry, error) {
+	if !fs.ValidPath(d.Path) {
+		return nil, errors.New("invalid wdir")
+	}
+
+	dir, err := os.ReadDir(d.Path)
+	if err != nil {
+		return nil, errors.New("could not open wdir")
+	}
+
+	var dents []fs.DirEntry
+	for _, dent := range dir {
+		if dent.Type().IsRegular() {
+			dents = append(dents, dent)
+		}
+	}
+
+	return dents, nil
+}
+
+func (d *dirStat) LenFiles() int {
+	return d.FileCount
+}
+
+func (d *dirStat) MarshalType() util.MarshallType {
+	return d.marshalType
 }

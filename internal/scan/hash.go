@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/h2non/filetype"
@@ -14,13 +15,15 @@ import (
 
 type MatcherFn func([]byte) (bool, types.Type)
 
-var defaultMatchers matchers.Map = make(matchers.Map)
+var (
+	defaultMatchers matchers.Map = make(matchers.Map)
+	goroutineCount  int          = 250
+)
 
 type fileHasher struct {
 	wg        sync.WaitGroup
 	wc        int
-	dir       *dirStat
-	fQueue    []string
+	dir       DirStatImpl
 	matcherFn MatcherFn
 	running   bool
 	doneCh    chan bool
@@ -39,39 +42,42 @@ func defaultMatcher(buf []byte) (bool, types.Type) {
 }
 
 type FileHasherImpl interface {
-	Run()
+	Run() (chan FileStatImpl, chan error, error)
 	SetMatcher(MatcherFn)
 	SetWorkerCount(int)
 	DoneNotify() chan bool
 }
 
-func NewFileHasher(dirStat *dirStat, fileQueue []string) FileHasherImpl {
+func NewFileHasher(dirStat DirStatImpl) FileHasherImpl {
 	return &fileHasher{
 		wg:        sync.WaitGroup{},
-		wc:        100,
+		wc:        goroutineCount,
 		dir:       dirStat,
-		fQueue:    fileQueue,
 		matcherFn: defaultMatcher,
 		running:   false,
 		doneCh:    make(chan bool, 1),
 	}
 }
 
-func NewFileHasherWithMatcher(dirStat *dirStat, fileQueue []string, fn MatcherFn) FileHasherImpl {
+func NewFileHasherWithMatcher(dirStat DirStatImpl, fn MatcherFn) FileHasherImpl {
 	return &fileHasher{
 		wg:        sync.WaitGroup{},
-		wc:        100,
+		wc:        goroutineCount,
 		dir:       dirStat,
-		fQueue:    fileQueue,
 		matcherFn: fn,
 		running:   false,
 		doneCh:    make(chan bool, 1),
 	}
 }
 
-func (fh *fileHasher) Run() {
+func (fh *fileHasher) Run() (chan FileStatImpl, chan error, error) {
 	fh.running = true
 	fh.doneCh <- false
+
+	fQueue, err := fh.dir.Files()
+	if err != nil {
+		return nil, nil, fmt.Errorf("error reading dir: %v", err)
+	}
 
 	chFile := make(chan string)
 	chHash := make(chan FileStatImpl)
@@ -113,17 +119,18 @@ func (fh *fileHasher) Run() {
 	}
 
 	go func() {
-		for _, fname := range fh.fQueue {
-			chFile <- fname
+		for _, f := range fQueue {
+			chFile <- filepath.Join(fh.dir.FPath(), f.Name())
 		}
 		close(chFile)
 		fh.wg.Wait()
 		close(chHash)
 		close(chErr)
+		fh.running = false
+		fh.doneCh <- true
 	}()
 
-	fh.running = false
-	fh.doneCh <- true
+	return chHash, chErr, nil
 }
 
 func (fh *fileHasher) SetMatcher(fn MatcherFn) {

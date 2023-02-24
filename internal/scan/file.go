@@ -11,7 +11,7 @@ import (
 )
 
 type fileStat struct {
-	Parent *dirStat
+	Parent DirStatImpl
 	Path   string
 	Type   types.Type
 	Hash   []byte
@@ -21,8 +21,8 @@ type FileStatImpl interface {
 	Write(w io.Writer) error
 }
 
-func NewFileStat(parent *dirStat, name string, hash []byte, typ types.Type) (FileStatImpl, error) {
-	fpath := path.Join(parent.Path, name)
+func NewFileStat(parent DirStatImpl, name string, hash []byte, typ types.Type) (FileStatImpl, error) {
+	fpath := path.Join(parent.FPath(), name)
 	if !fs.ValidPath(fpath) {
 		return nil, fmt.Errorf("invalid path: %v", fpath)
 	}
@@ -36,7 +36,7 @@ func NewFileStat(parent *dirStat, name string, hash []byte, typ types.Type) (Fil
 }
 
 func (f *fileStat) Write(w io.Writer) error {
-	buf, err := util.Marshall(f.Parent.marshallType, f)
+	buf, err := util.Marshall(f.Parent.MarshalType(), f)
 	if err != nil {
 		return fmt.Errorf("could not marshall: %v", err)
 	}

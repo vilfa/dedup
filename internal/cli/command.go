@@ -16,19 +16,19 @@ const (
 )
 
 type IndexCommand struct {
-	base *baseCommand
+	*baseCommand
 }
 
 type DryRunCommand struct {
-	base *baseCommand
+	*baseCommand
 }
 
 type ExportCommand struct {
-	base *baseCommand
+	*baseCommand
 }
 
 type ResolveCommand struct {
-	base *baseCommand
+	*baseCommand
 }
 
 func NewCommandFactory(logger *log.Logger) func() map[string]cli.CommandFactory {
