@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"sync"
+	"os"
 	"time"
 
 	"github.com/vilfa/dedup/internal/scan"
@@ -54,68 +54,65 @@ func (c DryRunCommand) Run(args []string) int {
 	}
 
 	h := scan.NewFileHasher(ds)
-	chRun, chDone, chErr, err := h.Run()
+	chData, chDone, chErr, err := h.Run()
 	if err != nil {
 		return 1
 	}
 
-	var processed []scan.FileStatImpl
-	progress := struct {
-		wg   sync.WaitGroup
-		m    sync.Mutex
-		n    int
-		na   int
-		done bool
-		t    time.Time
-	}{wg: sync.WaitGroup{}, m: sync.Mutex{}, n: 0, na: ds.NFiles(), done: false, t: time.Now()}
-
-	progress.wg.Add(2)
+	var out []scan.FileStatImpl
+	progress := util.NewProgressor(ds.NFiles())
+	progress.WgAdd(2)
 
 	go func() {
+		defer progress.WgDone()
+
 		for {
 			select {
-			case f := <-chRun:
-				processed = append(processed, f)
-				progress.m.Lock()
-				progress.n++
-				progress.m.Unlock()
+			case data := <-chData:
+				out = append(out, data)
+				progress.Inc()
 			case err := <-chErr:
-				if err != nil {
-					c.Log.Printf("processing error: %v", err)
-				}
-			case done := <-chDone:
-				if done {
-					progress.m.Lock()
-					progress.done = true
-					progress.m.Unlock()
-					progress.wg.Done()
-					return
-				}
+				c.Log.Printf("processing error: %v", err)
+				progress.Inc()
+			case <-chDone:
+				return
 			}
 		}
 	}()
 
 	go func() {
+		defer progress.WgDone()
+
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
+
 		for range ticker.C {
-			progress.m.Lock()
-			c.Log.Printf("processed %v/%v files", progress.n, progress.na)
-			if progress.done {
-				c.Log.Printf("processing done in %v", time.Since(progress.t))
-				progress.m.Unlock()
-				progress.wg.Done()
+			pCurr, pAll, pPerc, pDone := progress.Progress()
+
+			c.Log.Printf("processed %v/%v (%v%%) files", pCurr, pAll, pPerc)
+			if pDone {
+				c.Log.Printf("processing done in %v", progress.Elapsed())
 				return
 			}
-			progress.m.Unlock()
 		}
 	}()
 
-	progress.wg.Wait()
+	progress.WgWait()
 
-	// for _, fh := range fhs {
-	// fh.Write(c.Log.Writer())
-	// }
+	dups := make(map[string][]string)
+	for _, f := range out { // TODO: Panic here.
+		dups[f.Sha256()] = append(dups[f.Sha256()], f.Path())
+	}
+
+	bDups, err := util.Marshall(util.Json, dups)
+	if err != nil {
+		return 1
+	}
+
+	err = os.WriteFile("temp.json", bDups, 0644)
+	if err != nil {
+		return 1
+	}
 
 	return 0
 }

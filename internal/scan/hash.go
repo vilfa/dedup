@@ -18,7 +18,7 @@ type MatcherFn func([]byte) (bool, types.Type)
 
 var (
 	defaultMatchers matchers.Map = make(matchers.Map)
-	goroutineCount  int          = 250
+	goroutineCount  int          = 1000
 )
 
 type fileHasher struct {
@@ -72,22 +72,21 @@ func NewFileHasherWithMatcher(dirStat DirStatImpl, fn MatcherFn) FileHasherImpl 
 
 func (fh *fileHasher) Run() (chan FileStatImpl, chan bool, chan error, error) {
 	fh.running = true
-	fh.chDone <- false
 
 	fQueue, err := fh.dir.Files()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("could not read dir: %v", err)
 	}
 
-	chFile := make(chan string)
-	chHash := make(chan FileStatImpl)
+	chIn := make(chan string)
+	chData := make(chan FileStatImpl)
 	chErr := make(chan error)
 
 	for i := 0; i < fh.wc; i++ {
 		fh.wg.Add(1)
 		go func() {
 			defer fh.wg.Done()
-			for fname := range chFile {
+			for fname := range chIn {
 				f, err := os.Open(fname)
 				if err != nil {
 					chErr <- fmt.Errorf("could not open file: %v, %v", fname, err)
@@ -112,7 +111,7 @@ func (fh *fileHasher) Run() (chan FileStatImpl, chan bool, chan error, error) {
 					if err != nil {
 						chErr <- fmt.Errorf("could not hash file: %v", err)
 					}
-					chHash <- fstat
+					chData <- fstat
 				}
 
 				f.Close()
@@ -122,17 +121,17 @@ func (fh *fileHasher) Run() (chan FileStatImpl, chan bool, chan error, error) {
 
 	go func() {
 		for _, f := range fQueue {
-			chFile <- filepath.Join(fh.dir.Path(), f.Name())
+			chIn <- filepath.Join(fh.dir.Path(), f.Name())
 		}
-		close(chFile)
+		close(chIn)
 		fh.wg.Wait()
-		close(chHash)
+
+		close(chData)
 		close(chErr)
-		fh.running = false
 		fh.chDone <- true
 	}()
 
-	return chHash, fh.chDone, chErr, nil
+	return chData, fh.chDone, chErr, nil
 }
 
 func (fh *fileHasher) SetMatcher(fn MatcherFn) {

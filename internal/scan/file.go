@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io"
 	"path"
@@ -10,13 +11,15 @@ import (
 )
 
 type fileStat struct {
-	Parent DirStatImpl
-	Path   string
-	Type   types.Type
-	Hash   []byte
+	Parent  DirStatImpl
+	AbsPath string
+	Type    types.Type
+	Hash    []byte
 }
 
 type FileStatImpl interface {
+	Sha256() string
+	Path() string
 	Write(w io.Writer) error
 }
 
@@ -24,11 +27,19 @@ func NewFileStat(parent DirStatImpl, name string, hash []byte, typ types.Type) (
 	fpath := path.Join(parent.Path(), name)
 
 	return &fileStat{
-		Parent: parent,
-		Path:   fpath,
-		Hash:   hash,
-		Type:   typ,
+		Parent:  parent,
+		AbsPath: fpath,
+		Hash:    hash,
+		Type:    typ,
 	}, nil
+}
+
+func (f *fileStat) Sha256() string {
+	return hex.EncodeToString(f.Hash)
+}
+
+func (f *fileStat) Path() string {
+	return f.AbsPath
 }
 
 func (f *fileStat) Write(w io.Writer) error {
