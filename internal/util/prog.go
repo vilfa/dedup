@@ -28,12 +28,18 @@ func NewProgressor(unitDone int) *Progressor {
 func (p *Progressor) Inc() bool {
 	p.m.Lock()
 	defer p.m.Unlock()
-	if p.uProg >= p.uDone {
+	if p.uProg >= p.uDone || p.done {
 		p.done = true
 		return false
 	}
 	p.uProg++
 	return true
+}
+
+func (p *Progressor) Done() {
+	p.m.Lock()
+	defer p.m.Unlock()
+	p.done = true
 }
 
 func (p *Progressor) Progress() (int, int, float64, bool) {

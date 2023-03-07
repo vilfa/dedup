@@ -54,7 +54,7 @@ func (c DryRunCommand) Run(args []string) int {
 	}
 
 	h := scan.NewFileHasher(ds)
-	chData, chDone, chErr, err := h.Run()
+	chData, chErr, chDone, err := h.Run()
 	if err != nil {
 		return 1
 	}
@@ -72,9 +72,11 @@ func (c DryRunCommand) Run(args []string) int {
 				out = append(out, data)
 				progress.Inc()
 			case err := <-chErr:
-				c.Log.Printf("processing error: %v", err)
-				progress.Inc()
+				if err != nil {
+					c.Log.Printf("processing error: %v", err)
+				}
 			case <-chDone:
+				progress.Done()
 				return
 			}
 		}
@@ -100,7 +102,7 @@ func (c DryRunCommand) Run(args []string) int {
 	progress.WgWait()
 
 	dups := make(map[string][]string)
-	for _, f := range out { // TODO: Panic here.
+	for _, f := range out { // TODO: Panic here sometimes.
 		dups[f.Sha256()] = append(dups[f.Sha256()], f.Path())
 	}
 
