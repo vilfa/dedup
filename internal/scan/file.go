@@ -3,7 +3,6 @@ package scan
 import (
 	"fmt"
 	"io"
-	"io/fs"
 	"path"
 
 	"github.com/h2non/filetype/types"
@@ -22,10 +21,7 @@ type FileStatImpl interface {
 }
 
 func NewFileStat(parent DirStatImpl, name string, hash []byte, typ types.Type) (FileStatImpl, error) {
-	fpath := path.Join(parent.FPath(), name)
-	if !fs.ValidPath(fpath) {
-		return nil, fmt.Errorf("invalid path: %v", fpath)
-	}
+	fpath := path.Join(parent.Path(), name)
 
 	return &fileStat{
 		Parent: parent,

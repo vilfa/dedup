@@ -1,9 +1,9 @@
 package scan
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path"
 	"time"
@@ -15,47 +15,66 @@ const (
 	dirStatFname = ".dedup_ds"
 )
 
+var (
+	cwd string
+)
+
 type dirStat struct {
-	Path        string
+	AbsPath     string
 	Size        int
-	FileCount   int
-	DirCount    int
-	SpecCount   int
-	Timestamp   int64
+	NumFiles    int
+	NumDirs     int
+	NumSpecial  int
+	Ts          int64
 	marshalType util.MarshallType
+	dEnts       []fs.DirEntry
 }
 
 type DirStatImpl interface {
-	FPath() string
+	Path() string
 	Read() error
 	Write() error
 	Stat() error
-	Ts() time.Time
+	Timestamp() time.Time
 	Files() ([]fs.DirEntry, error)
-	LenFiles() int
+	NFiles() int
 	MarshalType() util.MarshallType
+}
+
+func init() {
+	var err error
+	cwd, err = os.Getwd()
+	if err != nil {
+		log.Panicf("could not get cwd: %v", err)
+	}
+}
+
+func resolvePath(p string) string {
+	if path.IsAbs(p) {
+		return p
+	} else {
+		return path.Join(cwd, p)
+	}
 }
 
 func NewDirStat(dir string, mTyp util.MarshallType) (DirStatImpl, error) {
 	return &dirStat{
-		Path:        dir,
+		AbsPath:     resolvePath(dir),
 		Size:        0,
-		FileCount:   0,
-		DirCount:    0,
-		Timestamp:   0,
+		NumFiles:    0,
+		NumDirs:     0,
+		Ts:          0,
 		marshalType: mTyp,
+		dEnts:       nil,
 	}, nil
 }
 
-func (d *dirStat) FPath() string {
-	return d.Path
+func (d *dirStat) Path() string {
+	return d.AbsPath
 }
 
 func (d *dirStat) Read() error {
-	fpath := path.Join(d.Path, dirStatFname)
-	if !fs.ValidPath(fpath) {
-		return fmt.Errorf("invalid dir info path: %v", fpath)
-	}
+	fpath := path.Join(d.AbsPath, dirStatFname)
 
 	buf, err := os.ReadFile(fpath)
 	if err != nil {
@@ -78,10 +97,7 @@ func (d *dirStat) Read() error {
 }
 
 func (d *dirStat) Write() error {
-	fpath := path.Join(d.Path, dirStatFname)
-	if !fs.ValidPath(fpath) {
-		return fmt.Errorf("invalid dir info path: %v", fpath)
-	}
+	fpath := path.Join(d.AbsPath, dirStatFname)
 
 	buf, err := util.Marshall(d.marshalType, d)
 	if err != nil {
@@ -97,59 +113,54 @@ func (d *dirStat) Write() error {
 }
 
 func (d *dirStat) Stat() error {
-	if !fs.ValidPath(d.Path) {
-		return errors.New("invalid wdir")
-	}
-
-	dir, err := os.ReadDir(d.Path)
+	dir, err := os.ReadDir(d.AbsPath)
 	if err != nil {
-		return errors.New("could not open wdir")
+		return fmt.Errorf("could not open dir: %v", d.AbsPath)
 	}
 
 	d.Size = len(dir)
-	d.DirCount = 0
-	d.FileCount = 0
-	d.SpecCount = 0
-	d.Timestamp = time.Now().UnixMilli()
+	d.NumDirs = 0
+	d.NumFiles = 0
+	d.NumSpecial = 0
+	d.Ts = time.Now().UnixMilli()
 	for _, dent := range dir {
 		if dent.Type().IsRegular() {
-			d.FileCount++
+			d.NumFiles++
 		} else if dent.Type().IsDir() {
-			d.DirCount++
+			d.NumDirs++
 		} else {
-			d.SpecCount++
+			d.NumSpecial++
 		}
 	}
 
 	return nil
 }
 
-func (d *dirStat) Ts() time.Time {
-	return time.UnixMilli(d.Timestamp)
+func (d *dirStat) Timestamp() time.Time {
+	return time.UnixMilli(d.Ts)
 }
 
 func (d *dirStat) Files() ([]fs.DirEntry, error) {
-	if !fs.ValidPath(d.Path) {
-		return nil, errors.New("invalid wdir")
+	if d.dEnts != nil {
+		return d.dEnts, nil
 	}
 
-	dir, err := os.ReadDir(d.Path)
+	dir, err := os.ReadDir(d.AbsPath)
 	if err != nil {
-		return nil, errors.New("could not open wdir")
+		return nil, fmt.Errorf("could not open dir: %v", err)
 	}
 
-	var dents []fs.DirEntry
 	for _, dent := range dir {
 		if dent.Type().IsRegular() {
-			dents = append(dents, dent)
+			d.dEnts = append(d.dEnts, dent)
 		}
 	}
 
-	return dents, nil
+	return d.dEnts, nil
 }
 
-func (d *dirStat) LenFiles() int {
-	return d.FileCount
+func (d *dirStat) NFiles() int {
+	return d.NumFiles
 }
 
 func (d *dirStat) MarshalType() util.MarshallType {

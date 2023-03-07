@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sync"
 
@@ -26,7 +27,7 @@ type fileHasher struct {
 	dir       DirStatImpl
 	matcherFn MatcherFn
 	running   bool
-	doneCh    chan bool
+	chDone    chan bool
 }
 
 func init() {
@@ -42,10 +43,9 @@ func defaultMatcher(buf []byte) (bool, types.Type) {
 }
 
 type FileHasherImpl interface {
-	Run() (chan FileStatImpl, chan error, error)
+	Run() (chan FileStatImpl, chan bool, chan error, error)
 	SetMatcher(MatcherFn)
 	SetWorkerCount(int)
-	DoneNotify() chan bool
 }
 
 func NewFileHasher(dirStat DirStatImpl) FileHasherImpl {
@@ -55,7 +55,7 @@ func NewFileHasher(dirStat DirStatImpl) FileHasherImpl {
 		dir:       dirStat,
 		matcherFn: defaultMatcher,
 		running:   false,
-		doneCh:    make(chan bool, 1),
+		chDone:    make(chan bool, 1),
 	}
 }
 
@@ -66,17 +66,17 @@ func NewFileHasherWithMatcher(dirStat DirStatImpl, fn MatcherFn) FileHasherImpl 
 		dir:       dirStat,
 		matcherFn: fn,
 		running:   false,
-		doneCh:    make(chan bool, 1),
+		chDone:    make(chan bool, 1),
 	}
 }
 
-func (fh *fileHasher) Run() (chan FileStatImpl, chan error, error) {
+func (fh *fileHasher) Run() (chan FileStatImpl, chan bool, chan error, error) {
 	fh.running = true
-	fh.doneCh <- false
+	fh.chDone <- false
 
 	fQueue, err := fh.dir.Files()
 	if err != nil {
-		return nil, nil, fmt.Errorf("error reading dir: %v", err)
+		return nil, nil, nil, fmt.Errorf("could not read dir: %v", err)
 	}
 
 	chFile := make(chan string)
@@ -96,7 +96,9 @@ func (fh *fileHasher) Run() (chan FileStatImpl, chan error, error) {
 
 				buf := make([]byte, 261)
 				if n, err := f.Read(buf); n != 261 || err != nil {
-					chErr <- fmt.Errorf("could not read file or weird file: %v, %v", fname, err)
+					chErr <- fmt.Errorf("skipping abnormal file: %v, is_tiny: %v, err: %v", fname, n < 261, err)
+					f.Close()
+					return
 				}
 
 				if ok, typ := fh.matcherFn(buf); ok {
@@ -106,7 +108,7 @@ func (fh *fileHasher) Run() (chan FileStatImpl, chan error, error) {
 					if _, err := io.Copy(hasher, f); err != nil {
 						chErr <- fmt.Errorf("could not hash file: %v, %v", fname, err)
 					}
-					fstat, err := NewFileStat(fh.dir, fname, hasher.Sum(nil), typ)
+					fstat, err := NewFileStat(fh.dir, path.Base(fname), hasher.Sum(nil), typ)
 					if err != nil {
 						chErr <- fmt.Errorf("could not hash file: %v", err)
 					}
@@ -120,27 +122,27 @@ func (fh *fileHasher) Run() (chan FileStatImpl, chan error, error) {
 
 	go func() {
 		for _, f := range fQueue {
-			chFile <- filepath.Join(fh.dir.FPath(), f.Name())
+			chFile <- filepath.Join(fh.dir.Path(), f.Name())
 		}
 		close(chFile)
 		fh.wg.Wait()
 		close(chHash)
 		close(chErr)
 		fh.running = false
-		fh.doneCh <- true
+		fh.chDone <- true
 	}()
 
-	return chHash, chErr, nil
+	return chHash, fh.chDone, chErr, nil
 }
 
 func (fh *fileHasher) SetMatcher(fn MatcherFn) {
 	fh.matcherFn = fn
 }
 
-func (fh *fileHasher) SetWorkerCount(cnt int) {
-	fh.wc = cnt
+func (fh *fileHasher) SetWorkerCount(count int) {
+	fh.wc = count
 }
 
 func (fh *fileHasher) DoneNotify() chan bool {
-	return fh.doneCh
+	return fh.chDone
 }

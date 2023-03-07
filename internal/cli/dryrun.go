@@ -22,105 +22,96 @@ func (c DryRunCommand) Run(args []string) int {
 		return 1
 	}
 
-	mshFt := util.Json
-	if len(args) == 2 {
-		if args[1] == "yaml" {
-			mshFt = util.Yaml
-		} else if args[1] == "json" {
-			mshFt = util.Json
+	var err error
+	defer func() {
+		if err != nil {
+			c.Log.Printf("dryrun error: %v", err)
 		} else {
-			c.Log.Printf("invalid marshall format")
-			return 1
+			c.Log.Printf("dryrun success")
 		}
-	}
+	}()
 
-	ds, err := scan.NewDirStat(args[0], mshFt)
+	ds, err := scan.NewDirStat(args[0], util.Json)
 	if err != nil {
-		c.Log.Printf("dry run error: %v", err)
 		return 1
 	}
 
 	err = ds.Read()
 	if err != nil {
-		c.Log.Printf("dry run error: %v", err)
 		c.Log.Printf("last run was never")
 	} else {
-		c.Log.Printf("last run was at %v", ds.Ts())
+		c.Log.Printf("last run was at %v", ds.Timestamp())
 	}
 
 	err = ds.Stat()
 	if err != nil {
-		c.Log.Printf("dry run error: %v", err)
 		return 1
 	}
 
 	err = ds.Write()
 	if err != nil {
-		c.Log.Printf("dry run error: %v", err)
 		return 1
 	}
-
-	c.Log.Print("created dirstat file")
 
 	h := scan.NewFileHasher(ds)
-
-	chF, chE, err := h.Run()
+	chRun, chDone, chErr, err := h.Run()
 	if err != nil {
-		c.Log.Printf("file hasher error: %v", err)
 		return 1
 	}
-	chD := h.DoneNotify()
 
-	var fhs []scan.FileStatImpl
-
-	prog := struct {
+	var processed []scan.FileStatImpl
+	progress := struct {
 		wg   sync.WaitGroup
 		m    sync.Mutex
 		n    int
-		nall int
+		na   int
 		done bool
-	}{wg: sync.WaitGroup{}, m: sync.Mutex{}, n: 0, nall: ds.LenFiles(), done: false}
+		t    time.Time
+	}{wg: sync.WaitGroup{}, m: sync.Mutex{}, n: 0, na: ds.NFiles(), done: false, t: time.Now()}
 
-	prog.wg.Add(2)
+	progress.wg.Add(2)
 
 	go func() {
 		for {
 			select {
-			case f := <-chF:
-				fhs = append(fhs, f)
-				prog.m.Lock()
-				prog.n = len(fhs)
-				prog.m.Unlock()
-			case err := <-chE:
-				c.Log.Printf("file hash processing error: %v", err)
-			case done := <-chD:
+			case f := <-chRun:
+				processed = append(processed, f)
+				progress.m.Lock()
+				progress.n++
+				progress.m.Unlock()
+			case err := <-chErr:
+				if err != nil {
+					c.Log.Printf("processing error: %v", err)
+				}
+			case done := <-chDone:
 				if done {
-					c.Log.Print("file hash operation done")
-					prog.m.Lock()
-					prog.done = true
-					prog.m.Unlock()
-					prog.wg.Done()
+					progress.m.Lock()
+					progress.done = true
+					progress.m.Unlock()
+					progress.wg.Done()
 					return
 				}
 			}
 		}
 	}()
+
 	go func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
-			prog.m.Lock()
-			c.Log.Printf("processed %v/%v files", prog.n, prog.nall)
-			if prog.done {
-				prog.m.Unlock()
-				prog.wg.Done()
+			progress.m.Lock()
+			c.Log.Printf("processed %v/%v files", progress.n, progress.na)
+			if progress.done {
+				c.Log.Printf("processing done in %v", time.Since(progress.t))
+				progress.m.Unlock()
+				progress.wg.Done()
 				return
 			}
-			prog.m.Unlock()
+			progress.m.Unlock()
 		}
 	}()
 
-	prog.wg.Wait()
+	progress.wg.Wait()
 
 	// for _, fh := range fhs {
 	// fh.Write(c.Log.Writer())
