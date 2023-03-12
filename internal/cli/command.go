@@ -36,15 +36,19 @@ func NewCommandFactory(logger *log.Logger) func() map[string]cli.CommandFactory 
 	return func() map[string]cli.CommandFactory {
 		return map[string]cli.CommandFactory{
 			"index": func() (cli.Command, error) {
+				base.name = "index"
 				return IndexCommand{base}, nil
 			},
 			"dryrun": func() (cli.Command, error) {
+				base.name = "dryrun"
 				return DryRunCommand{base}, nil
 			},
 			"export": func() (cli.Command, error) {
+				base.name = "export"
 				return ExportCommand{base}, nil
 			},
 			"resolve": func() (cli.Command, error) {
+				base.name = "resolve"
 				return ResolveCommand{base}, nil
 			},
 		}
